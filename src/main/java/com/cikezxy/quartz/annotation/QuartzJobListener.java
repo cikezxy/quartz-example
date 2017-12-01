@@ -11,9 +11,6 @@ import org.springframework.core.annotation.AnnotationUtils;
 
 import java.util.*;
 
-/**
- *
- */
 public class QuartzJobListener implements ApplicationListener<ContextRefreshedEvent> {
     @Autowired
     private Scheduler scheduler;
