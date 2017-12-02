@@ -1,94 +1,68 @@
 package com.cikezxy.quartz.annotation;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import org.quartz.Job;
-import org.quartz.JobDetail;
-import org.quartz.Scheduler;
-import org.quartz.SchedulerException;
+import org.quartz.*;
+import org.quartz.impl.JobDetailImpl;
+import org.quartz.impl.triggers.CronTriggerImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.core.annotation.AnnotationUtils;
-import org.springframework.scheduling.quartz.CronTriggerBean;
-import org.springframework.scheduling.quartz.JobDetailBean;
 
-public class QuartJobListener implements ApplicationListener<ContextRefreshedEvent>
-{
+import java.util.*;
+
+public class QuartzJobListener implements ApplicationListener<ContextRefreshedEvent> {
     @Autowired
     private Scheduler scheduler;
 
-    public void onApplicationEvent(ContextRefreshedEvent event)
-    {
-        try
-        {
+
+    public void onApplicationEvent(ContextRefreshedEvent event) {
+        try {
             ApplicationContext applicationContext = event.getApplicationContext();
-            List<CronTriggerBean> cronTriggerBeans = this.loadCronTriggerBeans(applicationContext);
-            this.scheduleJobs(cronTriggerBeans);
-        }
-        catch (Exception e) {
+            Map<JobDetail, CronTrigger> jobDetailCronTriggerMap = this.loadCronTriggerBeans(applicationContext);
+            this.scheduleJobs(jobDetailCronTriggerMap);
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private List<CronTriggerBean> loadCronTriggerBeans(ApplicationContext applicationContext)
-    {
+    private Map<JobDetail, CronTrigger> loadCronTriggerBeans(ApplicationContext applicationContext) {
         Map<String, Object> quartzJobBeans = applicationContext.getBeansWithAnnotation(QuartzJob.class);
-        Set<String> beanNames = quartzJobBeans.keySet();
-        List<CronTriggerBean> cronTriggerBeans = new ArrayList<CronTriggerBean>();
-        for (String beanName : beanNames)
-        {
-            CronTriggerBean cronTriggerBean = null;
-            Object object = quartzJobBeans.get(beanName);
-            System.out.println(object);
+        Map<JobDetail, CronTrigger> jobTriggerMap = new HashMap<JobDetail, CronTrigger>();
+
+        for (Map.Entry<String, Object> entry : quartzJobBeans.entrySet()) {
+            Object job = entry.getValue();
             try {
-                cronTriggerBean = this.buildCronTriggerBean(object);
+                QuartzJob quartzJobAnnotation = AnnotationUtils.findAnnotation(job.getClass(), QuartzJob.class);
+                if (Job.class.isAssignableFrom(job.getClass())) {
+
+                    CronTriggerImpl cronTriggerBean = new CronTriggerImpl();
+                    cronTriggerBean.setCronExpression(quartzJobAnnotation.cronExp());
+                    cronTriggerBean.setName(job.getClass().getName() + "_trigger");
+                    cronTriggerBean.setJobGroup(Scheduler.DEFAULT_GROUP);
+                    cronTriggerBean.setStartTime(new Date(System.currentTimeMillis() + quartzJobAnnotation.startDelayMills()));
+                    cronTriggerBean.setTimeZone(TimeZone.getDefault());
+
+                    JobDetailImpl jobDetail = new JobDetailImpl();
+                    jobDetail.setName(job.getClass().getName());
+                    jobDetail.setJobClass((Class<? extends Job>) job.getClass());
+
+                    jobTriggerMap.put(jobDetail, cronTriggerBean);
+                } else {
+                    throw new RuntimeException(job.getClass() + " doesn't implemented " + Job.class);
+                }
             } catch (Exception e) {
-                e.printStackTrace();
+
             }
 
-            if(cronTriggerBean != null)
-            {
-                cronTriggerBeans.add(cronTriggerBean);
-            }
         }
-        return cronTriggerBeans;
+        return jobTriggerMap;
     }
 
-    public CronTriggerBean buildCronTriggerBean(Object job) throws Exception
-    {
-        CronTriggerBean cronTriggerBean = null;
-        QuartzJob quartzJobAnnotation = AnnotationUtils.findAnnotation(job.getClass(), QuartzJob.class);
-        if(Job.class.isAssignableFrom(job.getClass()))
-        {
-            System.out.println("It is a Quartz Job");
-            cronTriggerBean = new CronTriggerBean();
-            cronTriggerBean.setCronExpression(quartzJobAnnotation.cronExp());
-            cronTriggerBean.setName(quartzJobAnnotation.name()+"_trigger");
-            //cronTriggerBean.setGroup(quartzJobAnnotation.group());
-            JobDetailBean jobDetail = new JobDetailBean();
-            jobDetail.setBeanName(quartzJobAnnotation.name());
-            //jobDetail.setGroup(quartzJobAnnotation.group());
-            jobDetail.setJobClass(job.getClass());
-            cronTriggerBean.setJobDetail(jobDetail);
-        }
-        else
-        {
-            throw new RuntimeException(job.getClass()+" doesn't implemented "+Job.class);
-        }
-        return cronTriggerBean;
-    }
-
-    protected void scheduleJobs(List<CronTriggerBean> cronTriggerBeans)
-    {
-        for (CronTriggerBean cronTriggerBean : cronTriggerBeans) {
-            JobDetail jobDetail = cronTriggerBean.getJobDetail();
+    protected void scheduleJobs(Map<JobDetail, CronTrigger> jobDetailCronTriggerMap) {
+        for (Map.Entry<JobDetail, CronTrigger> entry : jobDetailCronTriggerMap.entrySet()) {
             try {
-                scheduler.scheduleJob(jobDetail, cronTriggerBean);
+                scheduler.scheduleJob(entry.getKey(), entry.getValue());
             } catch (SchedulerException e) {
                 e.printStackTrace();
             }

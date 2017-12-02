@@ -13,7 +13,7 @@ public class ScheduledJob extends QuartzJobBean{
 	
 	
 	@Override
-	protected void executeInternal(JobExecutionContext arg0)
+	protected void executeInternal(JobExecutionContext context)
 			throws JobExecutionException {
 		anotherBean.printAnotherMessage();
 	}

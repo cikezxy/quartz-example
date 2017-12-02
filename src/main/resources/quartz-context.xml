@@ -37,17 +37,14 @@
 	<!-- Run the job every 5 seconds only on weekends -->
 	<bean id="cronTrigger"  class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
 		<property name="jobDetail" ref="complexJobDetail" />
-		<property name="cronExpression" value="0/5 * * ? * SAT-SUN" />
+		<property name="cronExpression" value="0/5 * * ? * MON-SUN" />
 	</bean>
 
 
 	<!-- Scheduler factory bean to glue together jobDetails and triggers to Configure Quartz Scheduler -->
 	<bean  class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
-		<property name="jobDetails">
-			<list>
-				<ref bean="simpleJobDetail" />
-				<ref bean="complexJobDetail" />
-			</list>
+		<property name="jobFactory">
+			<bean class="org.springframework.scheduling.quartz.SpringBeanJobFactory"></bean>
 		</property>
 
 		<property name="triggers">
