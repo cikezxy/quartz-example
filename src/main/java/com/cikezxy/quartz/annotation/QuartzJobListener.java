@@ -15,10 +15,6 @@ public class QuartzJobListener implements ApplicationListener<ContextRefreshedEv
     @Autowired
     private Scheduler scheduler;
 
-    @Autowired
-    private AnnotationJobRepository jobRepository;
-
-
     public void onApplicationEvent(ContextRefreshedEvent event) {
         try {
             ApplicationContext applicationContext = event.getApplicationContext();
@@ -51,7 +47,6 @@ public class QuartzJobListener implements ApplicationListener<ContextRefreshedEv
                     jobDetail.setJobClass((Class<? extends Job>) job.getClass());
 
                     jobTriggerMap.put(jobDetail, cronTriggerBean);
-                    jobRepository.putJob(job.getClass().getName(),(Job) job);
                 } else {
                     throw new RuntimeException(job.getClass() + " doesn't implemented " + Job.class);
                 }
