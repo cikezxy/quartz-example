@@ -9,12 +9,11 @@ import java.lang.annotation.Target;
 
 import org.springframework.stereotype.Component;
 
-@Target({ElementType.TYPE})
+@Target({ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-@Component
 public @interface QuartzJob {
-    String cronExp();
-
+    String cron();
+    int priority() default 5;
     long startDelayMills() default 0;
 }
