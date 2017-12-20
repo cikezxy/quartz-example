@@ -1,108 +1,82 @@
 package com.cikezxy.quartz.annotation;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.quartz.*;
+import org.quartz.CronTrigger;
+import org.quartz.JobDetail;
+import org.quartz.Scheduler;
+import org.quartz.SchedulerException;
 import org.quartz.impl.JobDetailImpl;
 import org.quartz.impl.triggers.CronTriggerImpl;
 import org.springframework.aop.support.AopUtils;
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.BeanCreationException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.beans.support.ArgumentConvertingMethodInvoker;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.core.annotation.AnnotationUtils;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.scheduling.annotation.Schedules;
-import org.springframework.scheduling.quartz.JobMethodInvocationFailedException;
-import org.springframework.scheduling.quartz.MethodInvokingJobDetailFactoryBean;
-import org.springframework.scheduling.quartz.QuartzJobBean;
-import org.springframework.util.MethodInvoker;
+import org.springframework.stereotype.Component;
 import org.springframework.util.ReflectionUtils;
 
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.*;
+import java.text.ParseException;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TimeZone;
 
-public class QuartzJobListener implements ApplicationListener<ContextRefreshedEvent> {
+@Component
+public class QuartzJobListener implements ApplicationListener<ContextRefreshedEvent>, BeanPostProcessor {
     @Autowired
     private Scheduler scheduler;
 
     @Autowired
-    private AnnotationJobRepository jobRepository;
-
-    @Autowired
     private ApplicationContext applicationContext;
 
+    @Autowired
+    private QuartzJobRepository repo;
+    private Map<JobDetail, CronTrigger> jobTriggerMap = new HashMap<JobDetail, CronTrigger>();
 
+
+    @Override
     public void onApplicationEvent(ContextRefreshedEvent event) {
         try {
-            if(this.applicationContext!=event.getApplicationContext()){
+            if (this.applicationContext != event.getApplicationContext()) {
                 return;
             }
-            Map<JobDetail, CronTrigger> jobDetailCronTriggerMap = this.loadCronTriggerBeans(applicationContext);
-            this.scheduleJobs(jobDetailCronTriggerMap);
+            this.scheduleJobs(jobTriggerMap);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private Map<JobDetail, CronTrigger> loadCronTriggerBeans(ApplicationContext applicationContext) {
-        Map<String, Object> quartzJobContainerMap = applicationContext.getBeansWithAnnotation(QuartzJobContainer.class);
-        Map<JobDetail, CronTrigger> jobTriggerMap = new HashMap<JobDetail, CronTrigger>();
+    private void processQuartzJob(Method method, Object bean) throws ParseException, NoSuchMethodException, ClassNotFoundException {
 
-        for (Map.Entry<String, Object> entry : quartzJobContainerMap.entrySet()) {
-            Object jobContainer = entry.getValue();
-            try {
-                QuartzJobContainer quartzJobContainerAnnotation = AnnotationUtils.findAnnotation(jobContainer.getClass(), QuartzJobContainer.class);
-                Class<?> targetClass = AopUtils.getTargetClass(jobContainer);
-                ReflectionUtils.doWithMethods(targetClass, new ReflectionUtils.MethodCallback() {
-                    @Override
-                    public void doWith(Method method) throws IllegalArgumentException, IllegalAccessException {
-                        QuartzJob quartzJob = AnnotationUtils.getAnnotation(method, QuartzJob.class);
-                        processQuartzJob(quartzJob, method, quartzJobContainerAnnotation);
-                    }
-                });
-            }catch(Exception e){
-                e.printStackTrace();
-            }
-
-
-
-
-
-
-            try {
-                if (Job.class.isAssignableFrom(jobContainer.getClass())) {
-
-                    CronTriggerImpl cronTriggerBean = new CronTriggerImpl();
-                    cronTriggerBean.setCronExpression(quartzJobAnnotation.cronExp());
-                    cronTriggerBean.setName(jobContainer.getClass().getName() + "_trigger");
-                    cronTriggerBean.setJobGroup(Scheduler.DEFAULT_GROUP);
-                    cronTriggerBean.setStartTime(new Date(System.currentTimeMillis() + quartzJobAnnotation.startDelayMills()));
-                    cronTriggerBean.setTimeZone(TimeZone.getDefault());
-
-                    JobDetailImpl jobDetail = new JobDetailImpl();
-                    jobDetail.setName(jobContainer.getClass().getName());
-                    jobDetail.setJobClass((Class<? extends Job>) jobContainer.getClass());
-
-                    jobTriggerMap.put(jobDetail, cronTriggerBean);
-                    jobRepository.putJob(jobContainer.getClass().getName(),(Job) jobContainer);
-                } else {
-                    throw new RuntimeException(jobContainer.getClass() + " doesn't implemented " + Job.class);
-                }
-            } catch (Exception e) {
-
-            }
-
+        QuartzJob quartzJobAnnotation = AnnotationUtils.getAnnotation(method, QuartzJob.class);
+        if (quartzJobAnnotation == null) {
+            return;
         }
-        return jobTriggerMap;
-    }
-
-    private void  processQuartzJob(QuartzJob quartzJob, Method method,QuartzJobContainer quartzJobContainer){
 
         ArgumentConvertingMethodInvoker invoker = new ArgumentConvertingMethodInvoker();
+        invoker.setTargetObject(bean);
         invoker.setTargetMethod(method.getName());
+        invoker.prepare();
+
+        CronTriggerImpl cronTriggerBean = new CronTriggerImpl();
+        cronTriggerBean.setCronExpression(quartzJobAnnotation.cron());
+        cronTriggerBean.setName(method.getName() + "_trigger");
+        cronTriggerBean.setJobGroup(quartzJobAnnotation.group());
+        cronTriggerBean.setStartTime(new Date(System.currentTimeMillis() + quartzJobAnnotation.startDelayMills()));
+        cronTriggerBean.setTimeZone(TimeZone.getDefault());
+
+        JobDetailImpl jobDetail = new JobDetailImpl();
+        jobDetail.setName(method.getName());
+        jobDetail.setGroup(quartzJobAnnotation.group());
+        jobDetail.setJobClass(MethodInvokingJob.class);
+
+        jobTriggerMap.put(jobDetail, cronTriggerBean);
+        repo.putJob(jobDetail, invoker);
     }
 
 
@@ -111,33 +85,39 @@ public class QuartzJobListener implements ApplicationListener<ContextRefreshedEv
             try {
                 scheduler.scheduleJob(entry.getKey(), entry.getValue());
             } catch (SchedulerException e) {
-                e.printStackTrace();
+                throw new RuntimeException(e);
             }
         }
     }
 
-    public static class MethodInvokingJob extends QuartzJobBean {
-        private MethodInvoker methodInvoker;
+    @Override
+    public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+        return bean;
+    }
 
-        public MethodInvokingJob() {
-        }
+    @Override
+    public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+        final Class<?> targetClass = AopUtils.getTargetClass(bean);
+        final Object b = bean;
+        try {
+            ReflectionUtils.doWithMethods(targetClass, new ReflectionUtils.MethodCallback() {
 
-        public void setMethodInvoker(MethodInvoker methodInvoker) {
-            this.methodInvoker = methodInvoker;
-        }
-
-        protected void executeInternal(JobExecutionContext context) throws JobExecutionException {
-            try {
-                context.setResult(this.methodInvoker.invoke());
-            } catch (InvocationTargetException var3) {
-                if (var3.getTargetException() instanceof JobExecutionException) {
-                    throw (JobExecutionException)var3.getTargetException();
-                } else {
-                    throw new JobMethodInvocationFailedException(this.methodInvoker, var3.getTargetException());
+                @Override
+                public void doWith(Method method) throws IllegalArgumentException, IllegalAccessException {
+                    try {
+                        processQuartzJob(method, b);
+                    } catch (ParseException e) {
+                        throw new IllegalArgumentException(e);
+                    } catch (ClassNotFoundException e1) {
+                        throw new IllegalArgumentException(e1);
+                    } catch (NoSuchMethodException e2) {
+                        throw new IllegalArgumentException(e2);
+                    }
                 }
-            } catch (Exception var4) {
-                throw new JobMethodInvocationFailedException(this.methodInvoker, var4);
-            }
+            });
+        } catch (Exception e) {
+            throw new BeanCreationException("Fail to create bean", e);
         }
+        return bean;
     }
 }

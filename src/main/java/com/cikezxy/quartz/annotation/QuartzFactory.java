@@ -6,18 +6,16 @@ import org.quartz.SchedulerException;
 import org.quartz.spi.JobFactory;
 import org.quartz.spi.TriggerFiredBundle;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
 @Component
-public class AnnotationJobFactory implements JobFactory{
+public class QuartzFactory implements JobFactory {
 
     @Autowired
-    ApplicationContext context;
+    QuartzJobRepository repo;
 
-
+    @Override
     public Job newJob(TriggerFiredBundle bundle, Scheduler scheduler) throws SchedulerException {
-        System.out.println("job factory invoked");
-        return context.getBean(bundle.getJobDetail().getJobClass());
+        return new MethodInvokingJob(repo.getJob(bundle.getJobDetail()));
     }
 }
